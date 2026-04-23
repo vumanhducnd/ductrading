@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DucTrading Live Overlay</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <!-- Header -->
+  <div class="header">
+    <span class="live-dot"></span>
+    <span class="header-title">LIVE PHÂN TÍCH CỔ PHIẾU</span>
+  </div>
+
+  <!-- Mã đang xem + countdown -->
+  <div class="current-section">
+    <div class="current-label">ĐANG XEM</div>
+    <div id="current-symbol" class="current-symbol">---</div>
+    <div id="current-requester" class="current-requester"></div>
+    <div class="countdown-wrap">
+      <div class="countdown-bar-bg">
+        <div id="countdown-bar" class="countdown-bar"></div>
+      </div>
+      <span id="countdown-text" class="countdown-text">--s</span>
+    </div>
+  </div>
+
+  <!-- Hàng đợi -->
+  <div class="queue-section">
+    <div class="queue-label">HÀNG ĐỢI <span id="queue-count" class="queue-count">0</span></div>
+    <ul id="queue-list" class="queue-list"></ul>
+  </div>
+
+  <!-- Thống kê -->
+  <div class="stats-section">
+    <span id="total-requests">Tổng request hôm nay: 0</span>
+  </div>
+
+  <!-- Control bar -->
+  <div class="control-bar">
+    <button class="btn btn-skip"     onclick="skipCurrent()">⏭ SKIP</button>
+    <button class="btn btn-clear"    onclick="clearQueue()">🗑 XÓA QUEUE</button>
+    <button class="btn btn-settings" onclick="toggleSettings()" title="Cài đặt">⚙</button>
+  </div>
+
+  <!-- Settings panel -->
+  <div id="settings-panel" class="settings-panel hidden">
+
+    <div class="settings-row">
+      <label class="settings-label">⏱ Thời gian mỗi mã</label>
+      <div class="settings-input-group">
+        <input id="interval-input" class="settings-input" type="number" min="5" max="300" value="30" />
+        <span class="settings-unit">giây</span>
+        <button class="btn btn-apply" onclick="applyInterval()">ÁP DỤNG</button>
+      </div>
+    </div>
+
+    <div class="settings-row" style="margin-top:8px">
+      <label class="settings-label">📋 Kích thước queue</label>
+      <div class="settings-input-group">
+        <input id="maxqueue-input" class="settings-input" type="number" min="1" max="100" value="20" />
+        <span class="settings-unit">mã</span>
+        <button class="btn btn-apply" onclick="applyMaxQueue()">ÁP DỤNG</button>
+      </div>
+    </div>
+
+    <div class="settings-divider"></div>
+
+    <div class="settings-row">
+      <label class="settings-label">🎯 TikTok đang live</label>
+    </div>
+    <div class="settings-input-group" style="margin-top:6px; width:100%">
+      <input id="username-input" class="settings-input settings-input-wide" type="text" placeholder="@username" />
+      <button class="btn btn-reconnect" onclick="reconnect()">KẾT NỐI</button>
+    </div>
+
+    <div id="settings-msg" class="settings-msg"></div>
+  </div>
+
+  <script>
+    // interval_seconds được đồng bộ từ server qua /api/state
+    let intervalSeconds = 30;
+    let remainingSeconds = 30;
+
+    // Lưu votes trước đó để phát hiện tăng vote → hiệu ứng +1
+    let prevVotes = {};
+
+    // ── Load settings lần đầu ─────────────────────────────────────────────
+    async function loadSettings() {
+      try {
+        const res = await fetch('/api/settings');
+        if (!res.ok) return;
+        const d = await res.json();
+        if (d.interval_seconds) {
+          intervalSeconds = d.interval_seconds;
+          document.getElementById('interval-input').value = intervalSeconds;
+        }
+        if (d.max_queue_size)
+          document.getElementById('maxqueue-input').value = d.max_queue_size;
+        if (d.tiktok_username)
+          document.getElementById('username-input').value = d.tiktok_username;
+      } catch (e) {}
+    }
+
+    // ── Fetch state mỗi 2s ────────────────────────────────────────────────
+    async function fetchState() {
+      try {
+        const res = await fetch('/api/state');
+        if (!res.ok) return;
+        const s = await res.json();
+
+        // Đồng bộ interval từ server
+        if (s.interval_seconds && s.interval_seconds !== intervalSeconds) {
+          intervalSeconds = s.interval_seconds;
+          document.getElementById('interval-input').value = intervalSeconds;
+        }
+
+        renderState(s);
+      } catch (e) {}
+    }
+
+    // ── Render giao diện ──────────────────────────────────────────────────
+    function renderState(s) {
+      // Mã hiện tại
+      const symEl = document.getElementById('current-symbol');
+      const reqEl = document.getElementById('current-requester');
+      if (s.current) {
+        symEl.textContent = s.current.symbol;
+        reqEl.textContent = `${s.current.requester}  ·  ${s.current.votes} votes`;
+      } else {
+        symEl.textContent = '---';
+        reqEl.textContent = 'Chờ mã tiếp theo...';
+      }
+
+      // Countdown — tính từ elapsed do server trả về
+      const elapsed = s.elapsed_seconds || 0;
+      remainingSeconds = Math.max(0, intervalSeconds - elapsed);
+      renderCountdown(remainingSeconds);
+
+      // Queue list + hiệu ứng vote
+      const listEl      = document.getElementById('queue-list');
+      const queueCountEl = document.getElementById('queue-count');
+      const items       = s.queue || [];
+      queueCountEl.textContent = items.length;
+      listEl.innerHTML = '';
+
+      items.forEach((item, idx) => {
+        const li = document.createElement('li');
+        li.className = 'queue-item' + (idx === 0 ? ' queue-next' : '');
+        li.innerHTML = `
+          <span class="q-rank">${idx + 1}</span>
+          <span class="q-symbol">${item.symbol}</span>
+          <span class="q-votes">${item.votes} <small>votes</small></span>
+        `;
+
+        // Hiệu ứng +N khi vote tăng
+        const prev = prevVotes[item.symbol];
+        if (prev !== undefined && item.votes > prev) {
+          const diff = item.votes - prev;
+          spawnVotePopup(li, diff);
+        }
+        prevVotes[item.symbol] = item.votes;
+
+        listEl.appendChild(li);
+      });
+
+      // Stats
+      document.getElementById('total-requests').textContent =
+        `Tổng request hôm nay: ${s.total_requests || 0}`;
+    }
+
+    // ── Hiệu ứng +N nổi lên ──────────────────────────────────────────────
+    function spawnVotePopup(liEl, count) {
+      const span = document.createElement('span');
+      span.className = 'vote-popup';
+      span.textContent = `+${count}`;
+      liEl.appendChild(span);
+      // Tự xóa sau khi animation kết thúc
+      span.addEventListener('animationend', () => span.remove());
+    }
+
+    // ── Countdown realtime (200ms) ────────────────────────────────────────
+    function renderCountdown(sec) {
+      const bar  = document.getElementById('countdown-bar');
+      const text = document.getElementById('countdown-text');
+      const pct  = intervalSeconds > 0
+        ? Math.max(0, Math.min(100, (sec / intervalSeconds) * 100))
+        : 0;
+      bar.style.width = pct + '%';
+      const isRed    = sec <= 5;
+      const isOrange = sec <= 10 && sec > 5;
+      bar.style.background  = isRed ? '#ff4444' : isOrange ? '#ffaa00' : '#00e676';
+      text.style.color      = isRed ? '#ff4444' : isOrange ? '#ffaa00' : '#00e676';
+      text.textContent      = Math.ceil(sec) + 's';
+    }
+
+    function tickCountdown() {
+      if (remainingSeconds > 0) {
+        remainingSeconds = Math.max(0, remainingSeconds - 0.2);
+        renderCountdown(remainingSeconds);
+      }
+    }
+
+    // ── Controls ──────────────────────────────────────────────────────────
+    async function skipCurrent() {
+      try {
+        await fetch('/api/skip', { method: 'POST' });
+        prevVotes = {};
+        await fetchState();
+      } catch (e) {}
+    }
+
+    async function clearQueue() {
+      if (!confirm('Xóa toàn bộ hàng đợi?')) return;
+      try {
+        await fetch('/api/clear', { method: 'POST' });
+        prevVotes = {};
+        await fetchState();
+      } catch (e) {}
+    }
+
+    function toggleSettings() {
+      document.getElementById('settings-panel').classList.toggle('hidden');
+    }
+
+    async function applyInterval() {
+      const val = parseInt(document.getElementById('interval-input').value, 10);
+      if (isNaN(val) || val < 5 || val > 300) {
+        showSettingsMsg('Thời gian phải từ 5 đến 300 giây', 'error');
+        return;
+      }
+      try {
+        const res = await fetch('/api/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ interval_seconds: val }),
+        });
+        const data = await res.json();
+        intervalSeconds = data.interval_seconds;
+        showSettingsMsg(`✓ Thời gian: ${intervalSeconds}s`, 'success');
+      } catch (e) {
+        showSettingsMsg('Lỗi kết nối server', 'error');
+      }
+    }
+
+    async function applyMaxQueue() {
+      const val = parseInt(document.getElementById('maxqueue-input').value, 10);
+      if (isNaN(val) || val < 1 || val > 100) {
+        showSettingsMsg('Kích thước queue phải từ 1 đến 100', 'error');
+        return;
+      }
+      try {
+        await fetch('/api/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ max_queue_size: val }),
+        });
+        showSettingsMsg(`✓ Queue tối đa: ${val} mã`, 'success');
+      } catch (e) {
+        showSettingsMsg('Lỗi kết nối server', 'error');
+      }
+    }
+
+    async function reconnect() {
+      const username = document.getElementById('username-input').value.trim();
+      if (!username) {
+        showSettingsMsg('Nhập @username cần kết nối', 'error');
+        return;
+      }
+      try {
+        const res = await fetch('/api/reconnect', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username }),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          showSettingsMsg(`✓ Đang kết nối ${data.username}...`, 'success');
+        } else {
+          showSettingsMsg(data.error || 'Lỗi', 'error');
+        }
+      } catch (e) {
+        showSettingsMsg('Lỗi kết nối server', 'error');
+      }
+    }
+
+    function showSettingsMsg(msg, type) {
+      const el = document.getElementById('settings-msg');
+      el.textContent = msg;
+      el.className = 'settings-msg ' + type;
+      setTimeout(() => { el.textContent = ''; el.className = 'settings-msg'; }, 3000);
+    }
+
+    // ── Khởi động ─────────────────────────────────────────────────────────
+    fetchState(); // interval_seconds lấy từ state ngay lần đầu
+    setInterval(fetchState, 2000);
+    setInterval(tickCountdown, 200);
+  </script>
+</body>
+</html>

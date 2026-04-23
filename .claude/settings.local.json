@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c ' *)",
+      "PowerShell(c:\\\\DucVM\\\\PROJECT\\\\DucTrading\\\\venv\\\\Scripts\\\\activate.ps1)",
+      "PowerShell(pip install -r c:\\\\DucVM\\\\PROJECT\\\\DucTrading\\\\live-trading\\\\requirements.txt)"
+    ]
+  }
+}

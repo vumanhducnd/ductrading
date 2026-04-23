@@ -1,0 +1,13 @@
+{
+  "name": "tiktok-bridge",
+  "version": "1.0.0",
+  "description": "TikTok Live comment bridge cho DucTrading",
+  "main": "bridge.js",
+  "scripts": {
+    "start": "node bridge.js",
+    "install-deps": "npm install"
+  },
+  "dependencies": {
+    "tiktok-live-connector": "^2.1.1-beta1"
+  }
+}
