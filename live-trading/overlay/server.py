@@ -21,6 +21,7 @@ CORS(app)
 
 _queue_manager = None
 _listener      = None
+_main_paused   = False
 
 # Settings động — đổi được qua API không cần restart app
 _settings = {
@@ -32,6 +33,24 @@ _settings = {
 
 def get_interval() -> int:
     return _settings["interval_seconds"]
+
+
+def is_main_paused() -> bool:
+    return _main_paused
+
+
+def pause_main_loop():
+    global _main_paused
+    _main_paused = True
+
+
+def resume_main_loop():
+    global _main_paused
+    _main_paused = False
+
+
+def is_listener_running() -> bool:
+    return _listener is not None and getattr(_listener, '_thread', None) is not None and _listener._thread.is_alive()
 
 
 def set_queue_manager(qm):
@@ -57,6 +76,8 @@ def api_state():
         return jsonify({"error": "queue_manager chưa được khởi tạo"}), 500
     state = _queue_manager.get_state()
     state["interval_seconds"] = _settings["interval_seconds"]
+    state["listener_running"] = is_listener_running()
+    state["main_paused"] = is_main_paused()
     return jsonify(state)
 
 
@@ -75,6 +96,42 @@ def api_clear():
         return jsonify({"error": "queue_manager chưa được khởi tạo"}), 500
     _queue_manager.clear()
     return jsonify({"cleared": True})
+
+
+@app.route("/api/main/pause", methods=["POST"])
+def api_main_pause():
+    if _queue_manager is None:
+        return jsonify({"error": "queue_manager chưa được khởi tạo"}), 500
+    pause_main_loop()
+    if hasattr(_queue_manager, "pause_current"):
+        _queue_manager.pause_current()
+    return jsonify({"ok": True, "paused": True})
+
+
+@app.route("/api/main/resume", methods=["POST"])
+def api_main_resume():
+    if _queue_manager is None:
+        return jsonify({"error": "queue_manager chưa được khởi tạo"}), 500
+    resume_main_loop()
+    if hasattr(_queue_manager, "resume_current"):
+        _queue_manager.resume_current()
+    return jsonify({"ok": True, "paused": False})
+
+
+@app.route("/api/listener/start", methods=["POST"])
+def api_listener_start():
+    if _listener is None:
+        return jsonify({"error": "listener chưa được khởi tạo"}), 500
+    _listener.start()
+    return jsonify({"ok": True, "running": True})
+
+
+@app.route("/api/listener/stop", methods=["POST"])
+def api_listener_stop():
+    if _listener is None:
+        return jsonify({"error": "listener chưa được khởi tạo"}), 500
+    _listener.stop()
+    return jsonify({"ok": True, "running": False})
 
 
 @app.route("/api/settings", methods=["GET"])

@@ -172,6 +172,10 @@ class TikTokListener:
 
     def start(self):
         """Khởi động listener trong background thread."""
+        if self._thread and self._thread.is_alive():
+            logger.info("[TIKTOK] Listener đã chạy, không khởi động lại")
+            return
+
         self._stop_event.clear()
         if DEMO_MODE:
             logger.info("[TIKTOK] Chạy ở chế độ DEMO")

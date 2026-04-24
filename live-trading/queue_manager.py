@@ -5,7 +5,7 @@ Hỗ trợ deduplication, vote counting và giới hạn kích thước queue.
 
 import threading
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from config import MAX_QUEUE_SIZE
 
 logger = logging.getLogger(__name__)
@@ -27,6 +27,8 @@ class QueueManager:
 
         # Thời điểm bắt đầu hiển thị mã hiện tại (dùng cho countdown overlay)
         self.current_started_at: datetime | None = None
+        self._pause_started_at: datetime | None = None
+        self._paused_duration: timedelta = timedelta(0)
 
     # ── Thêm mã vào queue ────────────────────────────────────────────────────
 
@@ -78,11 +80,15 @@ class QueueManager:
             if not self.queue:
                 self.current = None
                 self.current_started_at = None
+                self._pause_started_at = None
+                self._paused_duration = timedelta(0)
                 return None
             # Sắp xếp theo votes giảm dần trước khi lấy
             self.queue.sort(key=lambda x: x["votes"], reverse=True)
             self.current = self.queue.pop(0)
             self.current_started_at = datetime.now()
+            self._pause_started_at = None
+            self._paused_duration = timedelta(0)
             logger.info("[QUEUE] → Chuyển sang %s (%d votes)", self.current["symbol"], self.current["votes"])
             return self.current
 
@@ -100,7 +106,23 @@ class QueueManager:
         with self._lock:
             self.queue.clear()
             logger.info("[QUEUE] Đã xóa toàn bộ queue")
+    def pause_current(self):
+        """Pause thời gian đếm ngược cho current item."""
+        with self._lock:
+            if self.current and self._pause_started_at is None:
+                self._pause_started_at = datetime.now()
+                logger.info("[QUEUE] Current paused")
 
+    def resume_current(self):
+        """Resume thời gian đếm ngược cho current item."""
+        with self._lock:
+            if self.current and self._pause_started_at is not None:
+                self._paused_duration += datetime.now() - self._pause_started_at
+                self._pause_started_at = None
+                logger.info("[QUEUE] Current resumed")
+
+    def is_paused(self) -> bool:
+        return self._pause_started_at is not None
     # ── Lấy trạng thái cho overlay ───────────────────────────────────────────
 
     def get_state(self) -> dict:
@@ -110,6 +132,10 @@ class QueueManager:
             elapsed = 0
             if self.current_started_at:
                 elapsed = (datetime.now() - self.current_started_at).total_seconds()
+                elapsed -= self._paused_duration.total_seconds()
+                if self._pause_started_at is not None:
+                    elapsed -= (datetime.now() - self._pause_started_at).total_seconds()
+                elapsed = max(0, elapsed)
 
             return {
                 "current": self.current,

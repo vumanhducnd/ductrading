@@ -39,6 +39,7 @@
 
   <!-- Control bar -->
   <div class="control-bar">
+    <button id="btn-toggle-pause" class="btn btn-toggle running" onclick="togglePause()" title="Tạm dừng chuyển mã">⏸</button>
     <button class="btn btn-skip"     onclick="skipCurrent()">⏭ SKIP</button>
     <button class="btn btn-clear"    onclick="clearQueue()">🗑 XÓA QUEUE</button>
     <button class="btn btn-settings" onclick="toggleSettings()" title="Cài đặt">⚙</button>
@@ -85,6 +86,27 @@
 
     // Lưu votes trước đó để phát hiện tăng vote → hiệu ứng +1
     let prevVotes = {};
+    let mainPaused = false;
+
+    function setPauseState(paused) {
+      mainPaused = paused;
+      const btn = document.getElementById('btn-toggle-pause');
+      btn.textContent = paused ? '▶' : '⏸';
+      btn.title = paused ? 'Tiếp tục chuyển mã' : 'Tạm dừng chuyển mã';
+      btn.className = 'btn btn-toggle ' + (paused ? 'stopped' : 'running');
+    }
+
+    async function togglePause() {
+      const url = mainPaused ? '/api/main/resume' : '/api/main/pause';
+      try {
+        const res = await fetch(url, { method: 'POST' });
+        if (!res.ok) throw new Error('Lỗi');
+        const data = await res.json();
+        setPauseState(data.paused);
+      } catch (e) {
+        console.error('Toggle pause failed', e);
+      }
+    }
 
     // ── Load settings lần đầu ─────────────────────────────────────────────
     async function loadSettings() {
@@ -114,6 +136,9 @@
         if (s.interval_seconds && s.interval_seconds !== intervalSeconds) {
           intervalSeconds = s.interval_seconds;
           document.getElementById('interval-input').value = intervalSeconds;
+        }
+        if (s.main_paused !== undefined) {
+          setPauseState(s.main_paused);
         }
 
         renderState(s);
@@ -156,11 +181,11 @@
 
         // Hiệu ứng +N khi vote tăng
         const prev = prevVotes[item.symbol];
-        if (prev !== undefined && item.votes > prev) {
-          const diff = item.votes - prev;
-          spawnVotePopup(li, diff);
+        if (prev !== undefined && item.votes > prev.votes) {
+          const diff = item.votes - prev.votes;
+          spawnVotePopup(li, diff, item.requester);
         }
-        prevVotes[item.symbol] = item.votes;
+        prevVotes[item.symbol] = { votes: item.votes, requester: item.requester };
 
         listEl.appendChild(li);
       });
@@ -170,11 +195,12 @@
         `Tổng request hôm nay: ${s.total_requests || 0}`;
     }
 
-    // ── Hiệu ứng +N nổi lên ──────────────────────────────────────────────
-    function spawnVotePopup(liEl, count) {
+    // ── Hiệu ứng +N nổi lên kèm tên user ─────────────────────────────────
+    function spawnVotePopup(liEl, count, requester) {
       const span = document.createElement('span');
       span.className = 'vote-popup';
-      span.textContent = `+${count}`;
+      const userText = requester ? requester.replace(/^@/, '') : 'user';
+      span.textContent = `+${count} ${userText}`;
       liEl.appendChild(span);
       // Tự xóa sau khi animation kết thúc
       span.addEventListener('animationend', () => span.remove());
@@ -293,6 +319,7 @@
     }
 
     // ── Khởi động ─────────────────────────────────────────────────────────
+    loadSettings();
     fetchState(); // interval_seconds lấy từ state ngay lần đầu
     setInterval(fetchState, 2000);
     setInterval(tickCountdown, 200);

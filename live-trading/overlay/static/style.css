@@ -261,6 +261,30 @@ body {
   color: #ffffff;
 }
 
+.btn-toggle {
+  flex: 0 0 38px;
+  font-size: 16px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.btn-toggle.running {
+  background: rgba(0, 230, 118, 0.18);
+  color: #00e676;
+  border-color: rgba(0, 230, 118, 0.45);
+}
+
+.btn-toggle.stopped {
+  background: rgba(255, 68, 68, 0.18);
+  color: #ff6666;
+  border-color: rgba(255, 68, 68, 0.35);
+}
+
+.btn-toggle:hover {
+  opacity: 0.9;
+}
+
 /* ── Settings panel ──────────────────────────────────────────────────────── */
 .settings-panel {
   background: rgba(255, 255, 255, 0.05);
@@ -345,12 +369,13 @@ body {
   right: 12px;
   top: 2px;
   color: #ffd700;
-  font-size: 15px;
+  font-size: 12px;
   font-weight: 900;
   text-shadow: 0 0 8px rgba(255, 215, 0, 0.7);
   pointer-events: none;
   animation: voteFloat 1s ease-out forwards;
   z-index: 20;
+  white-space: nowrap;
 }
 
 @keyframes voteFloat {

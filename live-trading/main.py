@@ -16,7 +16,7 @@ from config import OVERLAY_PORT, LOG_FILE
 from queue_manager import QueueManager
 from tiktok_listener import TikTokListener
 from auto_typer import AutoTyper
-from overlay.server import set_queue_manager, set_listener, run_server, get_interval
+from overlay.server import set_queue_manager, set_listener, run_server, get_interval, is_main_paused
 
 # ── Logging setup ─────────────────────────────────────────────────────────────
 def setup_logging():
@@ -73,6 +73,11 @@ def start_overlay():
 def main_loop():
     logger.info("[MAIN] Main loop khởi động — interval: %ds", get_interval())
     while not _shutdown_event.is_set():
+        if is_main_paused():
+            logger.debug("[MAIN] Main loop paused, đợi resume...")
+            time.sleep(1)
+            continue
+
         item = queue.next()
         if item:
             symbol = item["symbol"]
@@ -88,6 +93,10 @@ def main_loop():
         # Chờ theo interval hiện tại (đọc lại mỗi giây để nhận thay đổi realtime)
         elapsed = 0
         while not _shutdown_event.is_set():
+            if is_main_paused():
+                logger.debug("[MAIN] Main loop paused during wait")
+                time.sleep(1)
+                continue
             if elapsed >= get_interval():
                 break
             time.sleep(1)
